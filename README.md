@@ -15,6 +15,15 @@ Scoper builds a self-contained production tree for a Composer project:
 
 It is a Composer plugin and a standalone CLI. The build is designed for CI: it is deterministic, reports every phase, and fails loudly when the tree is not safe to ship.
 
+## Why Scoper
+
+Most scopers parse and reprint every PHP file. Scoper replaces only the name byte ranges that need renaming.
+
+- line numbers, blank lines, comments, CRLF endings, indentation and formatting stay unchanged;
+- a scoped file differs from its source only where a symbol was renamed;
+- stack traces and `__LINE__` values still map to the original source;
+- the result stays reviewable and diffs cleanly in CI.
+
 ## Requirements
 
 - PHP 8.3 or newer
@@ -116,7 +125,7 @@ On a TTY, phases with a known total show a real progress bar; other phases show 
 4. **Dependencies** — installs production dependencies into the output directory from the project lock file.
 5. **Stage source files** — copies the configured source entries.
 6. **Removals** — applies the `remove` policy before scoping.
-7. **Scope namespaces** — inventories declarations, plans every replacement, verifies the rewritten PHP, then applies it.
+7. **Scope namespaces** — inventories declarations, splices only the name byte ranges, verifies syntax and survivors, then applies the edits. Files are never reprinted.
 8. **Generate autoloader** — writes a classmap loader for the scoped tree.
 9. **Verify tree** — loads the staged tree in a clean PHP process and runs the configured probes.
 10. **Finalise** — removes Composer metadata and VCS files.
@@ -126,25 +135,25 @@ The shipper never contains `composer.json` or `composer.lock`. Composer's own au
 
 ## Configuration
 
-All settings live under `extra.scoper`. `extra.build` is also read and merged underneath `extra.scoper`; it exists so an older policy-only configuration can keep working.
+All settings live under `extra.scoper`. Other locations, including the retired `extra.build` key, are rejected.
 
-| Key               | Default                         | Description                                                                      |
-| ----------------- | ------------------------------- | -------------------------------------------------------------------------------- |
-| `prefix`          | required                        | Namespace prefix or object with `namespace` and optional `global` styles.        |
-| `source`          | required                        | Files and directories copied into the output tree.                               |
-| `vendor`          | `config.vendor-dir` or `vendor` | Project vendor directory.                                                        |
-| `dist`            | `dist`                          | Built asset directory checked or copied by the build.                            |
-| `output`          | `build`                         | Staged production tree.                                                          |
-| `artifacts`       | `.build`                        | Build metadata: prefix map, installed package list, log and verify config.       |
-| `releases`        | `releases`                      | Release zip directory.                                                           |
-| `assets.command`  | `null`                          | String or list of shell commands run before staging.                             |
-| `assets.sources`  | `[]`                            | Files and directories whose modification time is compared with `dist`.           |
-| `assets.check`    | `warn`                          | `off`, `warn` or `fail`.                                                         |
-| `composer.args`   | `[]`                            | Extra arguments appended to `composer install`.                                  |
-| `verify.probes`   | `null`                          | PHP file returning per-package probe callables.                                  |
-| `verify.own`      | autoload roots                  | Project roots that must remain byte-identical while their imports are scoped.    |
-| `release.name`    | composer package name           | Base name of the release zip.                                                    |
-| `release.version` | composer `version`              | Object with `file`, `constant` and/or `header` used to read the shipped version. |
+| Key                   | Default                         | Description                                                                   |
+| --------------------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| `prefix`              | required                        | Namespace prefix or object with `namespace` and optional `global` styles.     |
+| `source`              | required                        | Files and directories copied into the output tree.                            |
+| `vendor`              | `config.vendor-dir` or `vendor` | Project vendor directory.                                                     |
+| `dist`                | `dist`                          | Built asset directory checked or copied by the build.                         |
+| `output`              | `build`                         | Staged production tree.                                                       |
+| `artifacts`           | `.build`                        | Build metadata: prefix map, installed package list, log and verify config.    |
+| `releases`            | `releases`                      | Release zip directory.                                                        |
+| `assets.command`      | `null`                          | String or list of shell commands run before staging.                          |
+| `assets.sources`      | `[]`                            | Files and directories whose modification time is compared with `dist`.        |
+| `assets.check`        | `warn`                          | `off`, `warn` or `fail`.                                                      |
+| `composer.args`       | `[]`                            | Extra arguments appended to `composer install`.                               |
+| `verify.probes`       | `null`                          | PHP file returning per-package probe callables.                               |
+| `verify.own`          | autoload roots                  | Project roots that must remain byte-identical while their imports are scoped. |
+| `release.name`        | composer package name           | Base name of the release zip.                                                 |
+| `release.plugin_file` | `null`                          | File whose WordPress `Version` header supplies the shipped version.           |
 
 All paths are relative to the project and must not escape it. `source` may not overlap `output` or `artifacts`, and `artifacts` may not sit inside `output`.
 
@@ -228,20 +237,20 @@ Glob semantics:
 
 ### Release version
 
+By default, the archive uses the top-level `version` from `composer.json`. To read the version from a plugin file instead:
+
 ```json
 {
     "release": {
         "name": "acme-plugin",
-        "version": {
-            "file": "plugin.php",
-            "constant": "ACME_PLUGIN_VERSION",
-            "header": "Version"
-        }
+        "plugin_file": "plugin.php"
     }
 }
 ```
 
-Scoper reads the constant and the plugin header, rejects a mismatch, and names the archive `<name>-<version>.zip`. Without `release.version`, a top-level `version` in `composer.json` is used when present.
+Scoper reads only the first 8 KB of `plugin_file`, normalizes CR line endings, and extracts the first non-empty WordPress `Version` header. A file without that header fails the release. The header name is fixed as `Version`; constants and custom header names are not supported.
+
+The archive is named `<name>-<version>.zip`. If neither `plugin_file` nor a composer `version` is available, no version suffix is added.
 
 Set `SCOPER_ALLOW_DIRTY=1` to package uncommitted changes for a local snapshot. Without it, `--release` requires a clean Git working tree.
 

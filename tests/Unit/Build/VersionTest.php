@@ -10,7 +10,7 @@ use CleanPlugins\Scoper\Tests\TestCase;
 
 final class VersionTest extends TestCase
 {
-    public function testReadsMatchingConstantAndHeader(): void
+    public function testReadsTheWordPressVersionHeader(): void
     {
         $this->write(
             'plugin.php',
@@ -19,46 +19,52 @@ final class VersionTest extends TestCase
             /**
              * Version: 1.2.3
              */
-            define('ACME_VERSION', '1.2.3');
             PHP
             ,
         );
 
         $config = $this->config([
             'release' => [
-                'name' => 'acme',
-                'version' => [
-                    'file' => 'plugin.php',
-                    'constant' => 'ACME_VERSION',
-                    'header' => 'Version',
-                ],
+                'plugin_file' => 'plugin.php',
             ],
         ]);
 
         self::assertSame('1.2.3', (new Version($config))->read());
     }
 
-    public function testRejectsDisagreeingConstantAndHeader(): void
+    public function testReadsAHeaderOnACommentLine(): void
     {
-        $this->write(
-            'plugin.php',
-            <<<'PHP'
-            <?php
-            /**
-             * Version: 1.2.4
-             */
-            define('ACME_VERSION', '1.2.3');
-            PHP
-            ,
-        );
+        $this->write('plugin.php', '<?php /* Version: 1.2.3 */');
 
         $config = $this->config([
             'release' => [
-                'version' => [
-                    'file' => 'plugin.php',
-                    'constant' => 'ACME_VERSION',
-                    'header' => 'Version',
-                ],
+                'plugin_file' => 'plugin.php',
+            ],
+        ]);
+
+        self::assertSame('1.2.3', (new Version($config))->read());
+    }
+
+    public function testNormalizesCrOnlyLineEndings(): void
+    {
+        $this->write('plugin.php', "<?php\r/**\r * Version: 1.2.3\r */");
+
+        $config = $this->config([
+            'release' => [
+                'plugin_file' => 'plugin.php',
+            ],
+        ]);
+
+        self::assertSame('1.2.3', (new Version($config))->read());
+    }
+
+    public function testIgnoresAHeaderAfterTheFirstEightKilobytes(): void
+    {
+        $this->write('plugin.php', str_repeat('x', 8192) . "\n * Version: 9.9.9\n");
+
+        $config = $this->config([
+            'release' => [
+                'plugin_file' => 'plugin.php',
             ],
         ]);
 
@@ -67,16 +73,26 @@ final class VersionTest extends TestCase
         (new Version($config))->read();
     }
 
-    public function testRejectsAMissingConstant(): void
+    public function testRejectsAMissingHeader(): void
     {
         $this->write('plugin.php', '<?php');
 
         $config = $this->config([
             'release' => [
-                'version' => [
-                    'file' => 'plugin.php',
-                    'constant' => 'ACME_VERSION',
-                ],
+                'plugin_file' => 'plugin.php',
+            ],
+        ]);
+
+        $this->expectException(ScoperException::class);
+
+        (new Version($config))->read();
+    }
+
+    public function testRejectsAMissingPluginFile(): void
+    {
+        $config = $this->config([
+            'release' => [
+                'plugin_file' => 'missing.php',
             ],
         ]);
 

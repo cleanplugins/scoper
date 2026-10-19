@@ -9,48 +9,53 @@ use CleanPlugins\Scoper\Exception\ScoperException;
 
 final class Version
 {
+    private const HEADER_BYTES = 8192;
+
     public function __construct(private readonly Config $config) {}
 
     public function read(): ?string
     {
-        $settings = $this->config->releaseVersion;
+        $file = $this->config->pluginFile;
 
-        if ($settings === null) {
+        if ($file === null) {
             $version = $this->config->composerJson['version'] ?? null;
 
             return is_string($version) && $version !== '' ? $version : null;
         }
 
-        $path = $this->config->absolute($settings['file']);
+        $path = $this->config->absolute($file);
 
         if (!is_file($path)) {
             throw new ScoperException("Version file not found: {$path}");
         }
 
-        $contents = (string) file_get_contents($path);
-        $constant = null;
-        $header = null;
+        $data = @file_get_contents($path, false, null, 0, self::HEADER_BYTES);
 
-        if ($settings['constant'] !== null) {
-            if (preg_match("/define\\(\\s*'" . preg_quote($settings['constant'], '/') . "'\\s*,\\s*'([^']+)'\\s*\\)/", $contents, $matches) !== 1) {
-                throw new ScoperException("Could not read {$settings['constant']} from {$settings['file']}");
+        if ($data === false) {
+            throw new ScoperException("Could not read {$path}");
+        }
+
+        // WordPress reads only the first 8 KB and normalizes CR-only line endings.
+        $data = str_replace("\r", "\n", $data);
+
+        foreach (preg_split("/\n/", $data) ?: [] as $line) {
+            if (preg_match('/^(?:[ \t]*<\?(?:php)?)?[ \t\/*#@]*Version:(.*)$/i', $line, $matches) !== 1) {
+                continue;
             }
 
-            $constant = $matches[1];
-        }
+            $version = self::clean($matches[1]);
 
-        if ($settings['header'] !== null) {
-            if (preg_match('/^ \* ' . preg_quote($settings['header'], '/') . ':\s*(\S+)\s*$/m', $contents, $matches) !== 1) {
-                throw new ScoperException("Could not read the {$settings['header']} header from {$settings['file']}");
+            if ($version !== '') {
+                return $version;
             }
-
-            $header = $matches[1];
         }
 
-        if ($constant !== null && $header !== null && $constant !== $header) {
-            throw new ScoperException("{$settings['constant']} ({$constant}) and the {$settings['header']} header ({$header}) disagree");
-        }
+        throw new ScoperException("Could not read the Version header from {$file}");
+    }
 
-        return $constant ?? $header;
+    /** WordPress's _cleanup_header_comment() behavior. */
+    private static function clean(string $value): string
+    {
+        return trim((string) preg_replace('/\s*(?:\*\/|\?>).*/', '', $value));
     }
 }

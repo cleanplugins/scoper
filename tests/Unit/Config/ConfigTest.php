@@ -31,12 +31,12 @@ final class ConfigTest extends TestCase
         self::assertNull($config->assetsCommand);
         self::assertSame('warn', $config->assetsCheck);
         self::assertSame('project', $config->releaseName);
-        self::assertNull($config->releaseVersion);
+        self::assertNull($config->pluginFile);
         self::assertSame(Path::join($this->tmp, 'build'), $config->outputPath());
         self::assertSame(Path::join($this->tmp, 'lib/vendor'), $config->vendorPath());
     }
 
-    public function testMergesBuildUnderScoper(): void
+    public function testRejectsLegacyExtraBuild(): void
     {
         $this->write(
             'composer.json',
@@ -47,10 +47,9 @@ final class ConfigTest extends TestCase
                         'build' => [
                             'prefix' => 'Vendor\\Build',
                             'source' => ['src'],
-                            'output' => 'from-build',
                         ],
                         'scoper' => [
-                            'output' => 'from-scoper',
+                            'output' => 'build',
                         ],
                     ],
                 ],
@@ -58,10 +57,68 @@ final class ConfigTest extends TestCase
             ),
         );
 
-        $config = Config::load($this->tmp);
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('extra.build');
 
-        self::assertSame('Vendor\\Build', $config->prefix->namespace);
-        self::assertSame('from-scoper', $config->output);
+        Config::load($this->tmp);
+    }
+
+    public function testRejectsTopLevelSettings(): void
+    {
+        $this->write(
+            'composer.json',
+            json_encode(
+                [
+                    'name' => 'acme/project',
+                    'build' => [
+                        'prefix' => 'Vendor\\Build',
+                        'source' => ['src'],
+                    ],
+                ],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+            ),
+        );
+
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('top-level build/scoper');
+
+        Config::load($this->tmp);
+    }
+
+    public function testRequiresExtraScoper(): void
+    {
+        $this->write(
+            'composer.json',
+            json_encode(
+                [
+                    'name' => 'acme/project',
+                ],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+            ),
+        );
+
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('No scoper configuration found under extra.scoper');
+
+        Config::load($this->tmp);
+    }
+
+    public function testRejectsABareConfigurationFile(): void
+    {
+        $this->write(
+            'composer.json',
+            json_encode(
+                [
+                    'prefix' => 'Vendor\\Build',
+                    'source' => ['src'],
+                ],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+            ),
+        );
+
+        $this->expectException(ScoperException::class);
+
+        Config::load($this->tmp);
     }
 
     public function testReadsAssetsComposerVerifyAndReleaseSettings(): void
@@ -81,11 +138,7 @@ final class ConfigTest extends TestCase
             ],
             'release' => [
                 'name' => 'acme-release',
-                'version' => [
-                    'file' => 'plugin.php',
-                    'constant' => 'ACME_VERSION',
-                    'header' => 'Version',
-                ],
+                'plugin_file' => 'plugin.php',
             ],
         ]);
 
@@ -96,7 +149,7 @@ final class ConfigTest extends TestCase
         self::assertSame('build/probes.php', $config->probes);
         self::assertSame(['src', 'includes'], $config->own);
         self::assertSame('acme-release', $config->releaseName);
-        self::assertSame('plugin.php', $config->releaseVersion['file'] ?? null);
+        self::assertSame('plugin.php', $config->pluginFile);
     }
 
     public function testRejectsUnknownSettings(): void
@@ -140,13 +193,36 @@ final class ConfigTest extends TestCase
         $this->config(['assets' => ['check' => 'sometimes']]);
     }
 
-    public function testRejectsReleaseVersionWithoutAReader(): void
+    public function testRejectsLegacyReleaseVersion(): void
+    {
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('release.version is no longer supported');
+
+        $this->config([
+            'release' => [
+                'version' => ['file' => 'plugin.php'],
+            ],
+        ]);
+    }
+
+    public function testRejectsAnEmptyPluginFile(): void
     {
         $this->expectException(ScoperException::class);
 
         $this->config([
             'release' => [
-                'version' => ['file' => 'plugin.php'],
+                'plugin_file' => '',
+            ],
+        ]);
+    }
+
+    public function testRejectsAnAbsolutePluginFile(): void
+    {
+        $this->expectException(ScoperException::class);
+
+        $this->config([
+            'release' => [
+                'plugin_file' => 'C:/outside/plugin.php',
             ],
         ]);
     }

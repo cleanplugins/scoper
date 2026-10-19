@@ -10,14 +10,13 @@ use CleanPlugins\Scoper\Support\Path;
 /**
  * Resolved build configuration for one project.
  *
- * The pipeline keys live in `extra.scoper`; `extra.build` is merged underneath it, so an existing
- * policy file keeps working while the pipeline is introduced. A bare config file (no `extra`) is
- * accepted for tests.
+ * Every setting lives under `extra.scoper`. Missing configuration, top-level build keys and the
+ * retired `extra.build` compatibility key are all rejected.
  */
 final class Config
 {
     /** @param list<string> $source */
-    private function __construct(public readonly string $projectDir, public readonly string $configPath, public readonly array $composerJson, public readonly Prefix $prefix, public readonly Policy $policy, public readonly string $vendor, public readonly string $dist, public readonly string $output, public readonly string $artifacts, public readonly string $releases, public readonly array $source, public readonly ?array $assetsCommand, public readonly array $assetsSources, public readonly string $assetsCheck, public readonly array $composerArgs, public readonly ?string $probes, public readonly array $own, public readonly string $releaseName, public readonly ?array $releaseVersion) {}
+    private function __construct(public readonly string $projectDir, public readonly string $configPath, public readonly array $composerJson, public readonly Prefix $prefix, public readonly Policy $policy, public readonly string $vendor, public readonly string $dist, public readonly string $output, public readonly string $artifacts, public readonly string $releases, public readonly array $source, public readonly ?array $assetsCommand, public readonly array $assetsSources, public readonly string $assetsCheck, public readonly array $composerArgs, public readonly ?string $probes, public readonly array $own, public readonly string $releaseName, public readonly ?string $pluginFile) {}
 
     public static function load(string $projectDir, ?string $configFile = null): self
     {
@@ -35,19 +34,22 @@ final class Config
         }
 
         $extra = is_array($json['extra'] ?? null) ? $json['extra'] : [];
-        $build = is_array($extra['build'] ?? null) ? $extra['build'] : [];
-        $scoper = is_array($extra['scoper'] ?? null) ? $extra['scoper'] : [];
 
-        if ($build === [] && $scoper === []) {
-            if (is_array($json['build'] ?? null) || is_array($json['scoper'] ?? null)) {
-                $build = is_array($json['build'] ?? null) ? $json['build'] : [];
-                $scoper = is_array($json['scoper'] ?? null) ? $json['scoper'] : [];
-            } elseif (!array_key_exists('name', $json)) {
-                $scoper = $json;
-            }
+        if (array_key_exists('build', $extra)) {
+            throw new ScoperException("{$configPath} uses extra.build; move the settings under extra.scoper");
         }
 
-        $settings = array_replace($build, $scoper);
+        if (array_key_exists('build', $json) || array_key_exists('scoper', $json)) {
+            throw new ScoperException("{$configPath} has top-level build/scoper settings; move them under extra.scoper");
+        }
+
+        $scoper = $extra['scoper'] ?? null;
+
+        if (!is_array($scoper) || $scoper === []) {
+            throw new ScoperException("No scoper configuration found under extra.scoper in {$configPath}");
+        }
+
+        $settings = $scoper;
 
         self::rejectUnknown($settings);
 
@@ -78,15 +80,20 @@ final class Config
         $own = self::stringList('verify.own', $verify['own'] ?? []);
 
         $release = is_array($settings['release'] ?? null) ? $settings['release'] : [];
+
+        if (array_key_exists('version', $release)) {
+            throw new ScoperException('release.version is no longer supported; use release.plugin_file');
+        }
+
         $releaseName = trim((string) ($release['name'] ?? self::defaultReleaseName((string) ($json['name'] ?? ''))));
 
         if ($releaseName === '') {
             throw new ScoperException('release.name must be a non-empty name');
         }
 
-        $releaseVersion = self::releaseVersion($release['version'] ?? null);
+        $pluginFile = self::pluginFile($release['plugin_file'] ?? null);
 
-        return new self($projectDir, $configPath, $json, Prefix::from($settings['prefix'] ?? null), Policy::from($settings, $vendor, $dist), $vendor, $dist, $output, $artifacts, $releases, $source, $assetsCommand, $assetsSources, $assetsCheck, $composerArgs, $probes, $own, $releaseName, $releaseVersion);
+        return new self($projectDir, $configPath, $json, Prefix::from($settings['prefix'] ?? null), Policy::from($settings, $vendor, $dist), $vendor, $dist, $output, $artifacts, $releases, $source, $assetsCommand, $assetsSources, $assetsCheck, $composerArgs, $probes, $own, $releaseName, $pluginFile);
     }
 
     public function absolute(string $relative = ''): string
@@ -275,39 +282,17 @@ final class Config
         }
     }
 
-    /** @return array{file: string, constant: ?string, header: ?string}|null */
-    private static function releaseVersion(mixed $value): ?array
+    private static function pluginFile(mixed $value): ?string
     {
         if ($value === null) {
             return null;
         }
 
-        if (!is_array($value) || array_is_list($value)) {
-            throw new ScoperException('release.version must be an object with file, constant and/or header');
+        if (!is_string($value) || trim($value) === '') {
+            throw new ScoperException('release.plugin_file must be a non-empty path');
         }
 
-        $file = $value['file'] ?? null;
-
-        if (!is_string($file) || trim($file) === '') {
-            throw new ScoperException('release.version.file must be a non-empty path');
-        }
-
-        $constant = $value['constant'] ?? null;
-        $header = $value['header'] ?? null;
-
-        if ($constant !== null && (!is_string($constant) || $constant === '')) {
-            throw new ScoperException('release.version.constant must be a non-empty string');
-        }
-
-        if ($header !== null && (!is_string($header) || $header === '')) {
-            throw new ScoperException('release.version.header must be a non-empty string');
-        }
-
-        if ($constant === null && $header === null) {
-            throw new ScoperException('release.version needs a constant and/or a header name');
-        }
-
-        return ['file' => self::relativePath('release.version.file', $file), 'constant' => $constant, 'header' => $header];
+        return self::relativePath('release.plugin_file', $value);
     }
 
     private static function defaultReleaseName(string $package): string
