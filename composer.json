@@ -54,7 +54,7 @@
     "extra": {
         "class": "CleanPlugins\\Scoper\\Plugin",
         "branch-alias": {
-            "dev-main": "0.1.x-dev"
+            "dev-main": "0.2.x-dev"
         }
     },
     "config": {
