@@ -24,17 +24,17 @@ It is a Composer plugin and a standalone CLI. The build is designed for CI: it i
 
 ## Installation
 
-Once the package is published on Packagist:
+Install the latest stable release:
 
 ```bash
 composer require --dev cleanplugins/scoper
 ```
 
-Until then, install it from the public repository:
+Install the development branch directly from GitHub:
 
 ```bash
 composer config repositories.scoper vcs https://github.com/cleanplugins/scoper.git
-composer require --dev cleanplugins/scoper:^0.1
+composer require --dev cleanplugins/scoper:dev-main
 ```
 
 Allow the plugin when Composer asks, or add it to the project manifest:
