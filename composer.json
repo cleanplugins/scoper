@@ -1,0 +1,63 @@
+{
+    "name": "cleanplugins/scoper",
+    "description": "Scope Composer dependencies and build a production package tree without collisions.",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "keywords": [
+        "composer",
+        "composer-plugin",
+        "dependency",
+        "package",
+        "scoper"
+    ],
+    "homepage": "https://github.com/cleanplugins/scoper",
+    "support": {
+        "issues": "https://github.com/cleanplugins/scoper/issues",
+        "source": "https://github.com/cleanplugins/scoper"
+    },
+    "authors": [
+        {
+            "name": "CleanPlugins"
+        }
+    ],
+    "require": {
+        "php": ">=8.3",
+        "composer-plugin-api": "^2.0",
+        "ext-json": "*",
+        "ext-tokenizer": "*",
+        "ext-zip": "*",
+        "nikic/php-parser": "^5.9",
+        "symfony/console": "^7.2",
+        "symfony/process": "^7.2"
+    },
+    "require-dev": {
+        "composer/composer": "^2.10",
+        "phpunit/phpunit": "^11.5 || ^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "CleanPlugins\\Scoper\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CleanPlugins\\Scoper\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/scoper"
+    ],
+    "scripts": {
+        "test": "phpunit",
+        "test:coverage": "phpunit --coverage-text"
+    },
+    "extra": {
+        "class": "CleanPlugins\\Scoper\\Plugin",
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

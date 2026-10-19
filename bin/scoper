@@ -1,0 +1,58 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+use CleanPlugins\Scoper\Application;
+use CleanPlugins\Scoper\Support\Format;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+/**
+ * Locates the Composer autoloader in the three layouts this package runs in:
+ *
+ *   - installed as a dependency: `<project>/vendor/cleanplugins/scoper/bin` → `<project>/vendor/autoload.php`
+ *   - linked from a path repository: `<project>/packages/<package>/bin` → `<project>/vendor/autoload.php`
+ *   - checked out on its own: `<package>/vendor/autoload.php`
+ */
+$candidates = [__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php', __DIR__ . '/../../../vendor/autoload.php'];
+
+$autoload = null;
+
+foreach ($candidates as $candidate) {
+    if (is_file($candidate)) {
+        $autoload = $candidate;
+
+        break;
+    }
+}
+
+if ($autoload === null) {
+    fwrite(STDERR, "scoper: could not locate composer's autoload.php; run composer install first.\n");
+    exit(1);
+}
+
+// The build is parser-heavy; an active Xdebug costs roughly 20x. Re-run the build in a child
+// process with it disabled, keeping the normal ini (the probes need mbstring and friends).
+if (extension_loaded('xdebug') && getenv('SCOPER_NO_REEXEC') !== '1' && in_array('scoper:build', $argv, true)) {
+    putenv('SCOPER_NO_REEXEC=1');
+
+    $parts = [PHP_BINARY, '-d', 'xdebug.mode=off', __FILE__, ...array_slice($argv, 1)];
+    $command = implode(' ', array_map('escapeshellarg', $parts));
+    passthru($command, $code);
+    exit($code);
+}
+
+require $autoload;
+
+$input = new ArgvInput();
+$output = new ConsoleOutput();
+$term = (string) getenv('TERM');
+$terminal = $term === 'dumb' ? false : $term !== '' || getenv('COLORTERM') || getenv('WT_SESSION') || getenv('ANSICON') || getenv('ConEmuANSI') || getenv('TERM_PROGRAM') || getenv('COMPOSER_BINARY');
+$force = !getenv('NO_COLOR') && (Format::enabled(getenv('FORCE_COLOR')) || (!Format::enabled(getenv('CI')) && $terminal));
+
+if ($force) {
+    $output->setDecorated(true);
+}
+
+exit((new Application())->run($input, $output));
+
