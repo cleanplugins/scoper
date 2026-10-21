@@ -208,7 +208,7 @@ final class Builder
             $phase->end(sprintf('%s files · %s', Format::count($release['entries']), Format::bytes($release['size'])));
         }
 
-        $rows = [['tree sha256', $hash], ['artifact', sprintf('%s files · %s', Format::count(count($files)), Format::bytes($size))], ['map', Path::relative($this->config->projectDir, $this->config->mapPath())]];
+        $rows = [['tree sha256', $hash], ['artifact', sprintf('%s files · %s', Format::count(count($files)), Format::bytes($size))], ['map', Path::relative($this->config->projectDir, $this->config->mapPath())], ['snapshot', Path::relative($this->config->projectDir, $this->config->snapshotPath())]];
 
         if ($release !== null) {
             $rows[] = ['release', Path::relative($this->config->projectDir, $release['path']) . ' · ' . Format::bytes($release['size'])];
