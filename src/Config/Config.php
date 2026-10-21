@@ -131,6 +131,11 @@ final class Config
         return $this->absolute($this->artifacts . '/installed.json');
     }
 
+    public function snapshotPath(): string
+    {
+        return $this->absolute($this->artifacts . '/snapshot');
+    }
+
     public function logPath(): string
     {
         return $this->absolute($this->artifacts . '/build.log');

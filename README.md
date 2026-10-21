@@ -127,11 +127,13 @@ On a TTY, phases with a known total show a real progress bar; other phases show 
 6. **Removals** — applies the `remove` policy before scoping.
 7. **Scope namespaces** — inventories declarations, splices only the name byte ranges, verifies syntax and survivors, then applies the edits. Files are never reprinted.
 8. **Generate autoloader** — writes a classmap loader for the scoped tree.
-9. **Verify tree** — loads the staged tree in a clean PHP process and runs the configured probes.
+9. **Verify tree** — compares the staged tree with the snapshot, rejects references to dev-only packages, then loads the tree in a clean PHP process and runs the configured probes.
 10. **Finalise** — removes Composer metadata and VCS files.
 11. **Package release** — optionally writes the release zip.
 
 The shipper never contains `composer.json` or `composer.lock`. Composer's own autoloader is not shipped either; the generated classmap is the only loader.
+
+The staged tree is copied to `<artifacts>/snapshot` before removals. The snapshot stays there for verification and diffing and is replaced by the next build. A reference in the shipped tree to a class or function provided only by a dev dependency fails the build, because `composer install --no-dev` would not ship it. String literals are scanned too, but only for declared dev-only symbols: a namespace-shaped string such as a hook name does not fail the build.
 
 ## Configuration
 
@@ -144,7 +146,7 @@ All settings live under `extra.scoper`. Other locations, including the retired `
 | `vendor`              | `config.vendor-dir` or `vendor` | Project vendor directory.                                                     |
 | `dist`                | `dist`                          | Built asset directory checked or copied by the build.                         |
 | `output`              | `build`                         | Staged production tree.                                                       |
-| `artifacts`           | `.build`                        | Build metadata: prefix map, installed package list, log and verify config.    |
+| `artifacts`           | `.build`                        | Build metadata: prefix map, installed package list, snapshot, log and verify config. |
 | `releases`            | `releases`                      | Release zip directory.                                                        |
 | `assets.command`      | `null`                          | String or list of shell commands run before staging.                          |
 | `assets.sources`      | `[]`                            | Files and directories whose modification time is compared with `dist`.        |

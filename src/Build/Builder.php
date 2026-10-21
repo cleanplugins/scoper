@@ -15,8 +15,11 @@ use CleanPlugins\Scoper\Support\Filesystem;
 use CleanPlugins\Scoper\Support\Format;
 use CleanPlugins\Scoper\Support\Path;
 use CleanPlugins\Scoper\Support\ProcessRunner;
+use CleanPlugins\Scoper\Verify\DevLeakScanner;
 use CleanPlugins\Scoper\Verify\Identity;
 use CleanPlugins\Scoper\Verify\LeakScanner;
+use CleanPlugins\Scoper\Verify\Snapshot;
+use CleanPlugins\Scoper\Verify\TreeVerifier;
 use CleanPlugins\Scoper\Verify\Verifier;
 use Throwable;
 use ZipArchive;
@@ -27,19 +30,22 @@ use ZipArchive;
  *   1. prerequisites (release guards, version)
  *   2. clean the output tree
  *   3. assets, then production dependencies
- *   4. stage the source files
- *   5. apply removals
- *   6. scope namespaces and global symbols
+ *   4. stage the source files, then snapshot them
+ *   5. apply removals, verified against the snapshot
+ *   6. scope namespaces and global symbols, verified against the snapshot
  *   7. generate the classmap autoloader
- *   8. verify (own code, leaks, checks, probes)
+ *   8. verify (dev-only references, leaks, checks, probes)
  *   9. hash the tree, and optionally package it
  */
 final class Builder
 {
+    private bool $snapshotCaptured = false;
+
     public function __construct(private readonly Config $config, private readonly Reporter $reporter, private readonly Filesystem $files, private readonly bool $noAssets = false, private readonly bool $stream = false) {}
 
     public function build(bool $package): BuildResult
     {
+        $this->snapshotCaptured = false;
         $this->reporter->intro($package ? 'scoper · release' : 'scoper · build');
         $runner = new ProcessRunner($this->reporter->output(), $this->config->logPath(), $this->stream);
         $version = null;
@@ -103,10 +109,22 @@ final class Builder
 
         $phase->end(count($this->config->source) . ' entries');
 
+        $phase = $this->reporter->phase('Snapshot');
+        (new Snapshot($this->config, $this->files))->capture(fn() => $phase->advance());
+        $this->snapshotCaptured = true;
+        $snapshotFiles = $this->files->files($this->config->snapshotPath());
+        $phase->end(Format::count(count($snapshotFiles)) . ' files · ' . Format::bytes($this->files->size($this->config->snapshotPath())));
+
         $phase = $this->reporter->phase('Removals');
         $pruned = (new Pruner($this->config, $this->files))->run();
+        $tree = new TreeVerifier($this->config, $this->files);
+        $tree->afterRemovals($pruned->deleted, $pruned->rewritten, fn() => $phase->advance());
 
         foreach ($pruned->warnings as $warning) {
+            $this->reporter->warn($warning);
+        }
+
+        foreach ($pruned->unused as $warning) {
             $this->reporter->warn($warning);
         }
 
@@ -134,23 +152,32 @@ final class Builder
         $this->reporter->render($autoload->sections);
 
         $phase = $this->reporter->phase('Verify tree');
-        $identity = new Identity($this->config, $this->files);
-        $ownFiles = $identity->assertIntact($scope->map);
+        $tick = fn() => $phase->advance();
+        $intact = $tree->afterScope($scope->map['edits'] ?? [], $tick);
+        $dev = (new DevLeakScanner($this->config, $this->files))->run($tick);
+
+        if ($dev->leaks !== []) {
+            throw new ScoperException(sprintf('%d dev-only dependency reference(s) in the shipped tree', count($dev->leaks)), array_slice($dev->leaks, 0, 40));
+        }
+
+        $identity = new Identity($this->config);
         $identity->assertIgnoredPackages($scope->map);
-        $scan = (new LeakScanner($this->config, $this->files))->run();
+        $scan = (new LeakScanner($this->config, $this->files))->run($tick);
 
         if ($scan->leaks !== []) {
             throw new ScoperException(sprintf('%d leak(s) found in %d files', count($scan->leaks), $scan->files), array_slice($scan->leaks, 0, 40));
         }
 
-        $verified = (new Verifier($this->config, $this->files))->run(fn() => $phase->advance());
+        $verified = (new Verifier($this->config, $this->files))->run($tick);
         $sections = [['type' => 'text', 'text' => sprintf('No leaked symbols in %d files', $scan->files)]];
+
+        $sections[] = ['type' => 'text', 'text' => $dev->packages > 0 ? sprintf('No dev-only dependency references in %d files', $dev->files) : 'No dev-only packages installed'];
 
         foreach ($verified->lines as $line) {
             $sections[] = ['type' => 'text', 'text' => $line];
         }
 
-        $phase->end(sprintf('%s own files intact · %s checks', Format::count($ownFiles), Format::count($verified->checks)));
+        $phase->end(sprintf('%s files intact · %s checks', Format::count($intact), Format::count($verified->checks + ($dev->packages > 0 ? 1 : 0))));
         $this->reporter->render($sections);
 
         $phase = $this->reporter->phase('Finalise');
@@ -188,6 +215,17 @@ final class Builder
         $this->reporter->summary($rows, $package ? 'Release ready' : 'Build complete');
 
         return new BuildResult($hash, count($files), $size, Path::relative($this->config->projectDir, $this->config->mapPath()), $release['path'] ?? null, $release['entries'] ?? 0, $release['size'] ?? 0);
+    }
+
+    /**
+     * The snapshot this run captured. A snapshot left by an earlier build is never reported: it does
+     * not describe the tree that failed.
+     */
+    public function capturedSnapshot(): ?string
+    {
+        $path = $this->config->snapshotPath();
+
+        return $this->snapshotCaptured && is_dir($path) ? $path : null;
     }
 
     private function installDependencies(ProcessRunner $runner, Phase $phase): int

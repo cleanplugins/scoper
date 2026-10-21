@@ -155,7 +155,7 @@ final class Filesystem
         return array_map(static fn(string $file): string => Path::relative($base, $file), $this->files($path));
     }
 
-    public function copy(string $source, string $target): void
+    public function copy(string $source, string $target, ?callable $tick = null): void
     {
         $source = $this->absolute($source);
         $target = $this->absolute($target);
@@ -169,6 +169,10 @@ final class Filesystem
 
             if (!@copy($source, $target)) {
                 throw new ScoperException("Could not copy {$source} to {$target}");
+            }
+
+            if ($tick !== null) {
+                $tick();
             }
 
             return;
@@ -187,7 +191,7 @@ final class Filesystem
                 continue;
             }
 
-            $this->copy($source . '/' . $entry, $target . '/' . $entry);
+            $this->copy($source . '/' . $entry, $target . '/' . $entry, $tick);
         }
     }
 

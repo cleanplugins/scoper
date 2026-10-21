@@ -30,6 +30,7 @@ final class BuildRunner
         $projectDir ??= (string) getcwd();
         $reporter = new Reporter($output);
         $config = null;
+        $builder = null;
 
         try {
             $config = Config::load($projectDir);
@@ -38,7 +39,7 @@ final class BuildRunner
 
             return Command::SUCCESS;
         } catch (\Throwable $error) {
-            $reporter->fatal($error, $config?->logPath());
+            $reporter->fatal($error, $config?->logPath(), $builder?->capturedSnapshot());
 
             return Command::FAILURE;
         }

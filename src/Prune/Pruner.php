@@ -38,6 +38,9 @@ final class Pruner
         $pathRows = [];
         $stringRows = [];
         $warnings = [];
+        $unused = [];
+        $deleted = [];
+        $rewritten = [];
         $prunedFiles = 0;
         $excludedFiles = 0;
 
@@ -49,7 +52,7 @@ final class Pruner
             $matches = $repository->names() === [] ? [] : $policy->packagesMatching($repository->names(), $pattern);
 
             if ($matches === []) {
-                $warnings[] = "package \"{$pattern}\" matched no installed package";
+                $unused[] = "package \"{$pattern}\" matched no installed package";
 
                 continue;
             }
@@ -64,12 +67,12 @@ final class Pruner
                 $directory = $repository->directoryFor($package);
 
                 if (!is_dir($buildDir . '/' . $directory)) {
-                    $warnings[] = "{$package} is not installed; drop the entry";
+                    $unused[] = "{$package} is not installed; drop the entry";
 
                     continue;
                 }
 
-                $count = count($this->files->files($buildDir . '/' . $directory));
+                $removed = $this->files->relativeFiles($buildDir . '/' . $directory, $buildDir);
 
                 try {
                     $this->files->remove($buildDir . '/' . $directory);
@@ -77,7 +80,9 @@ final class Pruner
                     throw new ScoperException("Could not remove {$directory}: {$exception->getMessage()}");
                 }
 
+                $deleted = array_merge($deleted, $removed);
                 $removedNames[$package] = true;
+                $count = count($removed);
                 $packageRows[] = [$package, sprintf('%d files', $count)];
             }
         }
@@ -127,14 +132,14 @@ final class Pruner
             }
 
             if ($matched === [] && $excluded === []) {
-                $warnings[] = "path \"{$pattern}\" matched nothing";
+                $unused[] = "path \"{$pattern}\" matched nothing";
 
                 continue;
             }
 
             foreach ($excludes as $exclude) {
                 if (!isset($used[$exclude])) {
-                    $warnings[] = "exclude \"{$exclude}\" matched nothing for {$pattern}";
+                    $unused[] = "exclude \"{$exclude}\" matched nothing for {$pattern}";
                 }
             }
 
@@ -145,6 +150,8 @@ final class Pruner
                     throw new ScoperException("Could not remove {$relative}: {$exception->getMessage()}");
                 }
             }
+
+            $deleted = array_merge($deleted, $matched);
 
             $pathRows[] = [$pattern, sprintf('%d files%s', count($matched), $excluded === [] ? '' : sprintf(' (%d excluded)', count($excluded)))];
             $prunedFiles += count($matched);
@@ -237,6 +244,7 @@ final class Pruner
                     }
 
                     $this->files->write($buildDir . '/' . $relative, $code);
+                    $rewritten[$relative] = hash('sha256', $code);
 
                     foreach ($counts as $value => $count) {
                         $matched[$value] = ($matched[$value] ?? 0) + $count;
@@ -249,7 +257,7 @@ final class Pruner
                     $count = $matched[$value] ?? 0;
 
                     if ($count === 0) {
-                        $warnings[] = "string \"{$value}\" matched nothing in " . ($scope === '*' ? 'any package' : $scope);
+                        $unused[] = "string \"{$value}\" matched nothing in " . ($scope === '*' ? 'any package' : $scope);
 
                         continue;
                     }
@@ -267,7 +275,7 @@ final class Pruner
             }
         }
 
-        return new PruneResult([['type' => 'table', 'title' => 'Packages', 'rows' => $packageRows], ['type' => 'table', 'title' => 'Paths', 'rows' => $pathRows], ['type' => 'table', 'title' => 'Strings', 'rows' => $stringRows]], $warnings, count($removedNames), $packagePatterns, count($pathRows), count($stringRows), $prunedFiles, $excludedFiles);
+        return new PruneResult([['type' => 'table', 'title' => 'Packages', 'rows' => $packageRows], ['type' => 'table', 'title' => 'Paths', 'rows' => $pathRows], ['type' => 'table', 'title' => 'Strings', 'rows' => $stringRows]], $warnings, $unused, array_values(array_unique($deleted)), $rewritten, count($removedNames), $packagePatterns, count($pathRows), count($stringRows), $prunedFiles, $excludedFiles);
     }
 
     private function pruneEmpty(string $directory, string $root): void

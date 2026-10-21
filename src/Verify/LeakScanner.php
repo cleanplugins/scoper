@@ -21,7 +21,7 @@ final class LeakScanner
 {
     public function __construct(private readonly Config $config, private readonly Filesystem $files) {}
 
-    public function run(): ScanResult
+    public function run(?callable $tick = null): ScanResult
     {
         $buildDir = $this->config->outputPath();
         $vendor = $this->config->vendor;
@@ -60,6 +60,10 @@ final class LeakScanner
         $allowedNamespaces = array_merge([$prefix->namespace], $ownPrefixes, array_diff(array_keys($policy->ignoredNamespaces), array_keys($policy->overrideNamespaces)));
 
         foreach ($this->files->files($buildDir . '/' . $vendor) as $path) {
+            if ($tick !== null) {
+                $tick();
+            }
+
             if (!str_ends_with($path, '.php')) {
                 continue;
             }
