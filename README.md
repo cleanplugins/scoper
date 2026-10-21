@@ -1,5 +1,6 @@
 # Scoper
 
+[![Package](https://img.shields.io/packagist/v/cleanplugins/scoper)](https://packagist.org/packages/cleanplugins/scoper)
 [![Tests](https://github.com/cleanplugins/scoper/actions/workflows/tests.yml/badge.svg)](https://github.com/cleanplugins/scoper/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
