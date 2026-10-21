@@ -125,7 +125,7 @@ final class Builder
         }
 
         foreach ($pruned->unused as $warning) {
-            $this->reporter->warn($warning);
+            $this->reporter->warn($warning, true);
         }
 
         $phase->end($pruned->files > 0 ? sprintf('%s files · %s patterns%s', Format::count($pruned->files), Format::count($pruned->patterns), $pruned->excluded > 0 ? ' · ' . Format::count($pruned->excluded) . ' kept' : '') : Format::count($pruned->patterns) . ' path patterns');
@@ -136,6 +136,10 @@ final class Builder
 
         foreach ($scope->warnings as $warning) {
             $this->reporter->warn($warning);
+        }
+
+        foreach ($scope->unused as $warning) {
+            $this->reporter->warn($warning, true);
         }
 
         $phase->end(sprintf('%s namespaces · %s globals · %s edits', Format::count($scope->namespaces), Format::count($scope->globals), Format::count($scope->edits)));

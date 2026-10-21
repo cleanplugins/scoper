@@ -110,12 +110,12 @@ vendor/bin/scoper scoper:build --release
 | `--release`     | Also write `releases/<release.name>-<version>.zip`.                             |
 | `--no-assets`   | Reuse the existing `dist` directory instead of running the asset command.       |
 | `--stream`      | Stream asset and Composer output to the terminal as it runs.                    |
-| `-v`            | Print the aligned detail sections for every phase.                              |
+| `-v`            | Print the aligned detail sections and unmatched policy entries for every phase.  |
 | `-q`            | Only print the phase summaries and the final result.                            |
 | `--no-ansi`     | Disable colors and animated progress.                                           |
 | `--working-dir` | Project directory for the standalone binary; defaults to the current directory. |
 
-On a TTY, phases with a known total show a real progress bar; other phases show a spinner with elapsed time. Redirected output, `-q`, `--no-ansi` and CI suppress both.
+On a TTY, phases with a known total show a real progress bar; other phases show a spinner with elapsed time. Redirected output, `-q`, `--no-ansi` and CI suppress both. Warnings are printed under the phase they belong to; policy entries that match nothing are only reported with `-v`.
 
 ## How it works
 
@@ -234,7 +234,7 @@ Glob semantics:
 - Matching is case-insensitive.
 - A pattern naming a directory covers everything below it.
 
-`override` wins over `ignore`; a package-qualified entry wins over an unqualified one; the longest namespace match wins. Duplicate decisions and entries that match nothing are reported.
+`override` wins over `ignore`; a package-qualified entry wins over an unqualified one; the longest namespace match wins. Duplicate decisions are reported; entries that match nothing are reported with `-v`.
 
 ### Release version
 

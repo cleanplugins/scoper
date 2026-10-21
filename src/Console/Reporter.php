@@ -44,6 +44,9 @@ final class Reporter
 
     private ?string $phaseTitle = null;
 
+    /** @var list<array{message: string, verbose: bool}> */
+    private array $pending = [];
+
     public function __construct(private readonly OutputInterface $output)
     {
         $this->started = microtime(true);
@@ -78,6 +81,7 @@ final class Reporter
 
         $this->firstPhase = false;
         $this->phaseTitle = $title;
+        $this->pending = [];
 
         if (!$this->canAnimate()) {
             return;
@@ -117,7 +121,7 @@ final class Reporter
     {
         $this->finishProgress();
 
-        $mark = $ok ? ($this->unicode() ? '<info>✔</info>' : '<info>ok</info>') : ($this->unicode() ? '<error>✖</error>' : '<error>!!</error>');
+        $mark = $this->mark($ok ? 'ok' : 'fail');
         $titleStyle = $ok ? '<fg=green;options=bold>' : '<fg=red;options=bold>';
 
         $line = $mark . ' ' . $titleStyle . OutputFormatter::escape($title) . '</> <fg=gray>in ' . Format::duration($milliseconds) . '</>';
@@ -131,11 +135,23 @@ final class Reporter
         if ($detail !== '' && $this->isVerbose()) {
             $this->write('  ' . OutputFormatter::escape($detail), OutputInterface::VERBOSITY_QUIET);
         }
+
+        $this->flushWarnings();
     }
 
-    public function warn(string $message): void
+    /**
+     * Warnings are held until the phase title is on screen, so they never interleave with the
+     * spinner or progress bar. Missing policy entries are only reported with -v.
+     */
+    public function warn(string $message, bool $verboseOnly = false): void
     {
-        $this->write('  <comment>' . ($this->unicode() ? '!' : '!!') . '</comment> ' . OutputFormatter::escape($message));
+        if ($this->phaseTitle !== null) {
+            $this->pending[] = [$message, $verboseOnly];
+
+            return;
+        }
+
+        $this->writeWarning($message, $verboseOnly);
     }
 
     /** @param list<array<string, mixed>> $sections */
@@ -204,7 +220,7 @@ final class Reporter
     public function summary(array $rows, string $label): void
     {
         $this->write('');
-        $this->write(($this->unicode() ? '<info>✔</info>' : '<info>ok</info>') . ' <fg=green;options=bold>' . OutputFormatter::escape($label) . '</> <fg=gray>in ' . Format::duration((microtime(true) - $this->started) * 1000) . '</>', OutputInterface::VERBOSITY_QUIET);
+        $this->write($this->mark('ok') . ' <fg=green;options=bold>' . OutputFormatter::escape($label) . '</> <fg=gray>in ' . Format::duration((microtime(true) - $this->started) * 1000) . '</>', OutputInterface::VERBOSITY_QUIET);
 
         if ($rows !== []) {
             $this->write('', OutputInterface::VERBOSITY_QUIET);
@@ -218,15 +234,16 @@ final class Reporter
         $this->write('', OutputInterface::VERBOSITY_QUIET);
     }
 
-    public function fatal(Throwable $error, ?string $logPath = null): void
+    public function fatal(Throwable $error, ?string $logPath = null, ?string $snapshotPath = null): void
     {
         $this->finishProgress(true);
+        $this->pending = [];
 
         $message = $error->getMessage();
         $details = $error instanceof ScoperException ? $error->details : [];
 
         $this->write('');
-        $this->write(($this->unicode() ? '<error>✖</error>' : '<error>!!</error>') . ' <fg=red;options=bold>Build failed</> <fg=gray>after ' . Format::duration((microtime(true) - $this->started) * 1000) . '</>', OutputInterface::VERBOSITY_QUIET);
+        $this->write($this->mark('fail') . ' <fg=red;options=bold>Build failed</> <fg=gray>after ' . Format::duration((microtime(true) - $this->started) * 1000) . '</>', OutputInterface::VERBOSITY_QUIET);
         $this->write('', OutputInterface::VERBOSITY_QUIET);
 
         foreach (preg_split('/\r?\n/', $message) ?: [] as $line) {
@@ -241,13 +258,45 @@ final class Reporter
             }
         }
 
-        if ($logPath !== null) {
+        if ($logPath !== null || $snapshotPath !== null) {
             $this->write('', OutputInterface::VERBOSITY_QUIET);
-            $this->write('  <fg=gray>captured output</>  ' . OutputFormatter::escape($logPath), OutputInterface::VERBOSITY_QUIET);
+
+            if ($logPath !== null) {
+                $this->write('  <fg=gray>captured output</>  ' . OutputFormatter::escape($logPath), OutputInterface::VERBOSITY_QUIET);
+            }
+
+            if ($snapshotPath !== null) {
+                $this->write('  <fg=gray>snapshot</>         ' . OutputFormatter::escape($snapshotPath), OutputInterface::VERBOSITY_QUIET);
+            }
         }
 
         $this->write('  <fg=gray>rerun</>            composer scoper:build', OutputInterface::VERBOSITY_QUIET);
         $this->write('', OutputInterface::VERBOSITY_QUIET);
+    }
+
+    /** @param 'ok'|'fail'|'warn' $state */
+    private function mark(string $state): string
+    {
+        return match ($state) {
+            'ok' => $this->unicode() ? '<fg=green;options=bold>✔</>' : '<fg=green;options=bold>+</>',
+            'fail' => $this->unicode() ? '<fg=red;options=bold>✖</>' : '<fg=red;options=bold>x</>',
+            'warn' => '<fg=yellow;options=bold>!</>',
+        };
+    }
+
+    private function flushWarnings(): void
+    {
+        $pending = $this->pending;
+        $this->pending = [];
+
+        foreach ($pending as [$message, $verboseOnly]) {
+            $this->writeWarning($message, $verboseOnly);
+        }
+    }
+
+    private function writeWarning(string $message, bool $verboseOnly): void
+    {
+        $this->write('  ' . $this->mark('warn') . ' ' . OutputFormatter::escape($message), $verboseOnly ? OutputInterface::VERBOSITY_VERBOSE : OutputInterface::VERBOSITY_NORMAL);
     }
 
     private function finishProgress(bool $clearOnly = false): void

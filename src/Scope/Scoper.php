@@ -248,6 +248,7 @@ final class Scoper
         $this->files->write($this->config->mapPath(), json_encode($map, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
 
         $warnings = [];
+        $unused = [];
 
         if (extension_loaded('xdebug') && !in_array(ini_get('xdebug.mode'), ['off', ''], true)) {
             $warnings[] = 'Xdebug is loaded; this run is roughly 20x slower (use php -n or -d xdebug.mode=off)';
@@ -257,33 +258,33 @@ final class Scoper
 
         foreach (array_keys($policy->ignoredPackages) as $pattern) {
             if ($policy->packagesMatching($installedNames, $pattern) === []) {
-                $warnings[] = "ignore package \"{$pattern}\" matched nothing; remove the entry";
+                $unused[] = "ignore package \"{$pattern}\" matched nothing; remove the entry";
             }
         }
 
         foreach (array_keys($policy->ignoredNamespaces) as $namespace) {
             if (!in_array($namespace, $declaredNamespaceKeys, true)) {
-                $warnings[] = "ignore namespace \"{$namespace}\" matched nothing; remove the entry";
+                $unused[] = "ignore namespace \"{$namespace}\" matched nothing; remove the entry";
             }
         }
 
         foreach (array_keys($policy->ignoredGlobals) as $symbol) {
             if (!isset($inventory->globals[$symbol])) {
-                $warnings[] = "ignore global \"{$symbol}\" matched nothing; remove the entry";
+                $unused[] = "ignore global \"{$symbol}\" matched nothing; remove the entry";
             }
         }
 
         foreach ($policy->ignoredStrings as $scope => $rules) {
             foreach (array_keys($rules) as $literal) {
                 if (!isset($stringPolicy->kept[$scope][$literal])) {
-                    $warnings[] = sprintf('ignore string "%s" in %s matched nothing; remove the entry', $literal, $scope === '*' ? 'any package' : $scope);
+                    $unused[] = sprintf('ignore string "%s" in %s matched nothing; remove the entry', $literal, $scope === '*' ? 'any package' : $scope);
                 }
             }
         }
 
         foreach (array_keys($policy->ignoredPaths) as $pattern) {
             if (!isset($usedPaths[$pattern])) {
-                $warnings[] = "ignore path \"{$pattern}\" matched nothing; remove the entry";
+                $unused[] = "ignore path \"{$pattern}\" matched nothing; remove the entry";
             }
         }
 
@@ -333,7 +334,7 @@ final class Scoper
 
         $sections = [['type' => 'table', 'title' => 'Prefixes', 'rows' => $prefixRows], ['type' => 'table', 'title' => 'Namespaces', 'rows' => $namespaceRows], ['type' => 'table', 'title' => 'Globals', 'rows' => $globalRows], ['type' => 'list', 'title' => 'Left alone', 'items' => $excludedNamespaces], ['type' => 'table', 'title' => 'Strings kept', 'rows' => $stringRows], ['type' => 'table', 'title' => 'Protected', 'rows' => $protectedRows], ['type' => 'table', 'title' => 'Guarded', 'rows' => $guardedRows]];
 
-        return new ScopeResult($map, $sections, $warnings, count($declaredNamespaces), count($declaredGlobals), $editsTotal, $filesScanned, count($plan), Path::relative($this->config->projectDir, $this->config->mapPath()));
+        return new ScopeResult($map, $sections, $warnings, $unused, count($declaredNamespaces), count($declaredGlobals), $editsTotal, $filesScanned, count($plan), Path::relative($this->config->projectDir, $this->config->mapPath()));
     }
 
     /** @return list<string> */

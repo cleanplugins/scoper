@@ -59,4 +59,35 @@ final class ScoperTest extends TestCase
         self::assertFileExists($config->mapPath());
         self::assertSame($plugin, str_replace('use Vendor\\Build\\Acme\\Library\\Thing;', 'use Acme\\Library\\Thing;', $this->read('build/src/Plugin.php')));
     }
+
+    public function testUnmatchedIgnoreEntriesAreReportedSeparately(): void
+    {
+        $this->write(
+            'build/vendor/acme/library/src/Thing.php',
+            <<<'PHP'
+            <?php
+
+            namespace Acme\Library;
+
+            class Thing
+            {
+            }
+            PHP
+            ,
+        );
+
+        $config = $this->config([
+            'prefix' => 'Vendor\\Build',
+            'source' => ['src'],
+            'ignore' => [
+                ['type' => 'namespace', 'value' => 'Missing\\Namespace', 'reason' => 'test'],
+            ],
+        ]);
+
+        $result = (new Scoper($config, new Filesystem($this->tmp)))->run();
+
+        self::assertCount(1, $result->unused);
+        self::assertStringContainsString('Missing\\Namespace', $result->unused[0]);
+        self::assertSame([], array_values(array_filter($result->warnings, static fn(string $warning): bool => str_contains($warning, 'matched nothing'))));
+    }
 }
