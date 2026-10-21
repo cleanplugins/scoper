@@ -15,8 +15,11 @@ use CleanPlugins\Scoper\Support\Path;
  */
 final class Config
 {
-    /** @param list<string> $source */
-    private function __construct(public readonly string $projectDir, public readonly string $configPath, public readonly array $composerJson, public readonly Prefix $prefix, public readonly Policy $policy, public readonly string $vendor, public readonly string $dist, public readonly string $output, public readonly string $artifacts, public readonly string $releases, public readonly array $source, public readonly ?array $assetsCommand, public readonly array $assetsSources, public readonly string $assetsCheck, public readonly array $composerArgs, public readonly ?string $probes, public readonly array $own, public readonly string $releaseName, public readonly ?string $pluginFile) {}
+    /**
+     * @param list<string> $source
+     * @param array<string, string> $probes
+     */
+    private function __construct(public readonly string $projectDir, public readonly string $configPath, public readonly array $composerJson, public readonly Prefix $prefix, public readonly Policy $policy, public readonly string $vendor, public readonly string $dist, public readonly string $output, public readonly string $artifacts, public readonly string $releases, public readonly array $source, public readonly ?array $assetsCommand, public readonly array $assetsSources, public readonly string $assetsCheck, public readonly array $composerArgs, public readonly array $probes, public readonly string $releaseName, public readonly ?string $pluginFile) {}
 
     public static function load(string $projectDir, ?string $configFile = null): self
     {
@@ -75,9 +78,7 @@ final class Config
         $composer = is_array($settings['composer'] ?? null) ? $settings['composer'] : [];
         $composerArgs = self::stringList('composer.args', $composer['args'] ?? []);
 
-        $verify = is_array($settings['verify'] ?? null) ? $settings['verify'] : [];
-        $probes = isset($verify['probes']) ? self::relativePath('verify.probes', $verify['probes']) : null;
-        $own = self::stringList('verify.own', $verify['own'] ?? []);
+        $probes = self::probes($settings['verify'] ?? null);
 
         $release = is_array($settings['release'] ?? null) ? $settings['release'] : [];
 
@@ -93,7 +94,7 @@ final class Config
 
         $pluginFile = self::pluginFile($release['plugin_file'] ?? null);
 
-        return new self($projectDir, $configPath, $json, Prefix::from($settings['prefix'] ?? null), Policy::from($settings, $vendor, $dist), $vendor, $dist, $output, $artifacts, $releases, $source, $assetsCommand, $assetsSources, $assetsCheck, $composerArgs, $probes, $own, $releaseName, $pluginFile);
+        return new self($projectDir, $configPath, $json, Prefix::from($settings['prefix'] ?? null), Policy::from($settings, $vendor, $dist), $vendor, $dist, $output, $artifacts, $releases, $source, $assetsCommand, $assetsSources, $assetsCheck, $composerArgs, $probes, $releaseName, $pluginFile);
     }
 
     public function absolute(string $relative = ''): string
@@ -221,7 +222,40 @@ final class Config
         return $commands;
     }
 
-    /** @param mixed $value @return list<string> */
+    /** @return array<string, string> */
+    private static function probes(mixed $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (!is_array($value) || ($value !== [] && array_is_list($value))) {
+            throw new ScoperException('verify must map package names to probe files');
+        }
+
+        $probes = [];
+
+        foreach ($value as $package => $file) {
+            $package = (string) $package;
+
+            if ($package === 'probes') {
+                throw new ScoperException('verify.probes is retired; map package names directly to probe files');
+            }
+
+            if ($package === 'own') {
+                throw new ScoperException('verify.own is retired; the whole staged tree is now checked against the build snapshot');
+            }
+
+            if (preg_match('#^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$#', $package) !== 1) {
+                throw new ScoperException("verify key \"{$package}\" is not a package name (expected vendor/name)");
+            }
+
+            $probes[$package] = self::relativePath('verify.' . $package, $file);
+        }
+
+        return $probes;
+    }
+
     private static function stringList(string $where, mixed $value): array
     {
         if ($value === null) {

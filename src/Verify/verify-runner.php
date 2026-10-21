@@ -23,10 +23,9 @@ $mapPath = $argv[3];
 $installedPath = $argv[4];
 $buildDir = rtrim(str_replace('\\', '/', $argv[5]), '/');
 $vendor = trim($argv[6], '/');
-$probesPath = $argv[7] ?? '';
-$ownRoots = $settings['ownRoots'] ?? [];
+$classRoots = $settings['classRoots'] ?? [];
 $ignoredPaths = $settings['ignoredPaths'] ?? [];
-$probeConfig = $settings['config'] ?? [];
+$probeFiles = is_array($settings['probes'] ?? null) ? $settings['probes'] : [];
 $map = is_file($mapPath) ? (json_decode((string) file_get_contents($mapPath), true) ?: []) : [];
 $installed = is_file($installedPath) ? (json_decode((string) file_get_contents($installedPath), true) ?: []) : [];
 $failures = [];
@@ -74,7 +73,7 @@ if (is_file($autoloaderPath)) {
 
 // 2. Every class declared in the scoped tree must autoload through the generated classmap.
 $declared = [];
-$roots = array_values(array_unique(array_merge([$vendor], $ownRoots)));
+$roots = array_values(array_unique(array_merge([$vendor], $classRoots)));
 
 foreach ($roots as $root) {
     if (!is_dir($buildDir . '/' . $root) && !is_file($buildDir . '/' . $root)) {
@@ -160,46 +159,75 @@ if ($map !== []) {
     }
 }
 
-// 4. Behaviour probes, for installed packages only.
-if ($probesPath !== '' && is_file($probesPath)) {
-    $probes = require $probesPath;
+// 4. Behaviour probes, for installed packages only. Each file is static: it receives no config and
+// returns a description string. A warning raised by the probe file itself (notably reading the
+// removed `$config`) fails the probe; warnings from code it happens to load do not.
+foreach ($probeFiles as $package => $probePath) {
+    $package = (string) $package;
+    $probePath = (string) $probePath;
 
-    if (!is_array($probes)) {
-        $fail('Probe file must return an array');
-    } else {
-        foreach ($probes as $package => $probe) {
-            $package = (string) $package;
-            $directory = scoper_package_directory($package, $installed, $vendor);
+    if (!is_file($probePath)) {
+        $fail("Probe file not found for {$package}: {$probePath}");
 
-            if (!is_dir($buildDir . '/' . $directory)) {
-                continue;
-            }
-
-            try {
-                $result = $probe($probeConfig);
-                $pass();
-                $lines[] = sprintf('Probe %s: %s', $package, $result);
-            } catch (Throwable $exception) {
-                $fail(sprintf('Probe %s failed: %s', $package, $exception->getMessage()));
-            }
-        }
+        continue;
     }
-} elseif ($probesPath !== '') {
-    $fail("Probe file not found: {$probesPath}");
+
+    $directory = scoper_package_directory($package, $installed, $vendor);
+
+    if (!is_dir($buildDir . '/' . $directory)) {
+        continue;
+    }
+
+    try {
+        $probe = str_replace('\\', '/', (string) (realpath($probePath) ?: $probePath));
+
+        set_error_handler(static function (int $severity, string $message, string $file, int $line) use ($probe): bool {
+            $reported = str_replace('\\', '/', (string) (realpath($file) ?: $file));
+            $same = PHP_OS_FAMILY === 'Windows' ? strcasecmp($reported, $probe) === 0 : $reported === $probe;
+
+            if (!$same) {
+                return false;
+            }
+
+            throw new ErrorException($message, 0, $severity, $file, $line);
+        }, E_WARNING | E_NOTICE | E_USER_WARNING | E_USER_NOTICE);
+
+        try {
+            $result = (static function (string $probePath): mixed {
+                return require $probePath;
+            })($probePath);
+        } finally {
+            restore_error_handler();
+        }
+
+        if (!is_string($result)) {
+            $fail("Probe for {$package} must return a string");
+
+            continue;
+        }
+
+        $pass();
+        $lines[] = sprintf('Probe %s: %s', $package, $result);
+    } catch (Throwable $exception) {
+        $fail(sprintf('Probe %s failed: %s', $package, $exception->getMessage()));
+    }
 }
 
 // 5. The project's own code must not still import an unscoped dependency namespace.
 $ownImports = [];
 
-foreach ($ownRoots as $root) {
-    foreach (scoper_php_files($buildDir . '/' . $root) as $full) {
-        $relative = scoper_relative($buildDir, $full);
-        $contents = (string) file_get_contents($full);
+foreach (scoper_php_files($buildDir) as $full) {
+    $relative = scoper_relative($buildDir, $full);
 
-        foreach (array_keys($map['namespaces'] ?? []) as $namespace) {
-            if (preg_match('/^use\s+' . preg_quote((string) $namespace, '/') . '\\\\/m', $contents) === 1) {
-                $ownImports[] = "{$relative} still imports {$namespace}";
-            }
+    if (str_starts_with($relative, $vendor . '/')) {
+        continue;
+    }
+
+    $contents = (string) file_get_contents($full);
+
+    foreach (array_keys($map['namespaces'] ?? []) as $namespace) {
+        if (preg_match('/^use\s+' . preg_quote((string) $namespace, '/') . '\\\\/m', $contents) === 1) {
+            $ownImports[] = "{$relative} still imports {$namespace}";
         }
     }
 }

@@ -152,8 +152,7 @@ All settings live under `extra.scoper`. Other locations, including the retired `
 | `assets.sources`      | `[]`                            | Files and directories whose modification time is compared with `dist`.        |
 | `assets.check`        | `warn`                          | `off`, `warn` or `fail`.                                                      |
 | `composer.args`       | `[]`                            | Extra arguments appended to `composer install`.                               |
-| `verify.probes`       | `null`                          | PHP file returning per-package probe callables.                               |
-| `verify.own`          | autoload roots                  | Project roots that must remain byte-identical while their imports are scoped. |
+| `verify`              | `{}`                            | Map of package name => static PHP probe file; returns a string.               |
 | `release.name`        | composer package name           | Base name of the release zip.                                                 |
 | `release.plugin_file` | `null`                          | File whose WordPress `Version` header supplies the shipped version.           |
 
@@ -274,25 +273,37 @@ When `--no-assets` is used, the command is skipped and the existing `dist` is re
 
 ## Probes
 
-Probes call the scoped code after it has been loaded in a clean process. A probe file returns a map of package name to callable:
+Probes call the scoped code after it has been loaded in a clean process. Map each package to its own PHP file:
+
+```json
+{
+    "extra": {
+        "scoper": {
+            "verify": {
+                "acme/library": "tools/verify-acme-library.php"
+            }
+        }
+    }
+}
+```
+
+Probe files are static: no configuration is passed. Hardcode the expected scoped names; when the prefix or policy changes, update the probe.
 
 ```php
 <?php
 
-return [
-    'acme/library' => static function (array $config): string {
-        $class = $config['prefix'] . '\\Acme\\Library\\Compiler';
+declare(strict_types=1);
 
-        if (!class_exists($class)) {
-            throw new RuntimeException("{$class} did not autoload");
-        }
+$class = 'Vendor\\Acme\\Build\\Acme\\Library\\Compiler';
 
-        return 'Compiler class loads';
-    },
-];
+if (!class_exists($class)) {
+    throw new RuntimeException("{$class} did not autoload");
+}
+
+return 'Compiler class loads';
 ```
 
-The callable receives the normalized scoper configuration. Probes run only for packages present in the staged tree.
+Probes run only for packages present in the staged tree. The file is still checked for existence, a file that returns anything other than a string fails the build, and a probe that reads the removed `$config` variable fails on the undefined variable. Warnings raised by code the probe happens to load do not fail it.
 
 ## CI example
 

@@ -26,15 +26,13 @@ final class Verifier
         $mapPath = $this->config->mapPath();
         $map = is_file($mapPath) ? (json_decode((string) file_get_contents($mapPath), true) ?: []) : [];
         $settings = [
-            'ownRoots' => $this->ownRoots(),
+            'classRoots' => $this->classRoots(),
             'ignoredPaths' => $map['excluded']['paths'] ?? $this->config->policy->ignoredPaths(),
-            'config' => $this->config->toArray(),
+            'probes' => $this->probeFiles(),
         ];
         $configPath = $this->config->artifactsPath() . '/verify-config.json';
         $this->files->write($configPath, json_encode($settings, JSON_UNESCAPED_SLASHES));
-        $probesPath = $this->config->probes !== null ? $this->config->absolute($this->config->probes) : '';
-
-        $command = implode(' ', array_map('escapeshellarg', [PHP_BINARY, '-d', 'xdebug.mode=off', '-d', 'display_errors=stderr', __DIR__ . '/verify-runner.php', $configPath, $this->config->outputPath() . '/' . $this->config->vendor . '/autoload.php', $mapPath, $this->config->installedPath(), $this->config->outputPath(), $this->config->vendor, $probesPath]));
+        $command = implode(' ', array_map('escapeshellarg', [PHP_BINARY, '-d', 'xdebug.mode=off', '-d', 'display_errors=stderr', __DIR__ . '/verify-runner.php', $configPath, $this->config->outputPath() . '/' . $this->config->vendor . '/autoload.php', $mapPath, $this->config->installedPath(), $this->config->outputPath(), $this->config->vendor]));
 
         $process = Process::fromShellCommandline($command, $this->config->projectDir, null, null, null);
         $process->setTimeout(null);
@@ -70,16 +68,24 @@ final class Verifier
             throw new ScoperException(sprintf('%d/%d checks failed', count($failures), $checks), $failures);
         }
 
-        return new VerifyResult($checks, [], $data['lines'] ?? [], 0);
+        return new VerifyResult($checks, $data['lines'] ?? []);
+    }
+
+    /** @return array<string, string> */
+    private function probeFiles(): array
+    {
+        $files = [];
+
+        foreach ($this->config->probes as $package => $file) {
+            $files[$package] = $this->config->absolute($file);
+        }
+
+        return $files;
     }
 
     /** @return list<string> */
-    private function ownRoots(): array
+    private function classRoots(): array
     {
-        if ($this->config->own !== []) {
-            return array_values(array_unique($this->config->own));
-        }
-
         $autoload = $this->config->composerJson['autoload'] ?? [];
         $roots = [];
 

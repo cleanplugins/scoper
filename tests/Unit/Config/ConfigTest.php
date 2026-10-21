@@ -133,8 +133,8 @@ final class ConfigTest extends TestCase
                 'args' => ['--prefer-dist'],
             ],
             'verify' => [
-                'probes' => 'build/probes.php',
-                'own' => ['src', 'includes'],
+                'acme/library' => 'tools/verify-library.php',
+                'acme/other' => 'tools/verify-other.php',
             ],
             'release' => [
                 'name' => 'acme-release',
@@ -146,8 +146,10 @@ final class ConfigTest extends TestCase
         self::assertSame(['src', 'vite.config.js'], $config->assetsSources);
         self::assertSame('fail', $config->assetsCheck);
         self::assertSame(['--prefer-dist'], $config->composerArgs);
-        self::assertSame('build/probes.php', $config->probes);
-        self::assertSame(['src', 'includes'], $config->own);
+        self::assertSame([
+            'acme/library' => 'tools/verify-library.php',
+            'acme/other' => 'tools/verify-other.php',
+        ], $config->probes);
         self::assertSame('acme-release', $config->releaseName);
         self::assertSame('plugin.php', $config->pluginFile);
     }
@@ -157,6 +159,45 @@ final class ConfigTest extends TestCase
         $this->expectException(ScoperException::class);
 
         $this->config(['unknown' => true]);
+    }
+
+    public function testRejectsTheRetiredVerifyProbesSetting(): void
+    {
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('verify.probes is retired');
+
+        $this->config(['verify' => ['probes' => 'scripts/verification-probes.php']]);
+    }
+
+    public function testRejectsTheRetiredVerifyOwnSetting(): void
+    {
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('verify.own is retired');
+
+        $this->config(['verify' => ['own' => ['src']]]);
+    }
+
+    public function testRejectsVerifyKeysThatAreNotPackageNames(): void
+    {
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('is not a package name');
+
+        $this->config(['verify' => ['scssphp' => 'scripts/verify.php']]);
+    }
+
+    public function testRejectsVerifyPathsThatEscapeTheProject(): void
+    {
+        $this->expectException(ScoperException::class);
+
+        $this->config(['verify' => ['acme/library' => '../verify.php']]);
+    }
+
+    public function testRejectsAVerifyListInsteadOfAMap(): void
+    {
+        $this->expectException(ScoperException::class);
+        $this->expectExceptionMessage('verify must map package names to probe files');
+
+        $this->config(['verify' => ['scripts/verify.php']]);
     }
 
     public function testRejectsAbsoluteSourcePaths(): void
