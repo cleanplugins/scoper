@@ -337,6 +337,24 @@ The package is split into these areas:
 - `Console` — commands, progress reporting and the shared runner.
 - `Support` — filesystem, path, process and formatting helpers.
 
+### Releasing
+
+Packagist publishes a release as soon as the tag is pushed, whether or not CI on the tag passes. Run everything that can fail before tagging.
+
+1. Pick the version. Before 1.0, a breaking config or behaviour change bumps the minor (`0.3.0`); a fix bumps the patch.
+2. Set `extra.branch-alias.dev-main` in `composer.json` to the next `X.Y.x-dev` and commit it. The tag must contain its own alias, so never bump the alias after tagging. For a patch where the alias already matches, there is nothing to change.
+3. Update this README: config tables, probe examples, behaviour changes and a migration note for breaking changes.
+4. Run `composer validate --strict --no-check-publish` and `composer test`.
+5. Push `main` and wait for green CI on Ubuntu and Windows.
+6. Tag and push:
+
+   ```bash
+   git tag -a X.Y.Z -m "X.Y.Z"
+   git push origin X.Y.Z
+   ```
+
+7. Do not change shipped code, the manifest or this README after the tag. Release the next patch instead, and never move a published tag.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
